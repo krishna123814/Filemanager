@@ -40,7 +40,25 @@ object Session {
 
     fun clearPass(ctx: Context) {
         pass = ""
+        clearClip()
         sp(ctx).edit().remove("pass").apply()
+    }
+
+    /** Storage ka root URL (AIC = `/dav/`, HF = `/hf/`), login URL se nikalta hai. */
+    fun rootFor(store: Store): String = Storages.root(store)
+
+    // Copy / Move clipboard (sirf memory me: app band hui to chali jaati hai; server ki job alag chalti rehti hai)
+    @Volatile var clip: List<ClipItem> = emptyList()
+    @Volatile var clipMove: Boolean = false
+
+    fun setClip(items: List<ClipItem>, move: Boolean) {
+        clip = items
+        clipMove = move
+    }
+
+    fun clearClip() {
+        clip = emptyList()
+        clipMove = false
     }
 
     fun hasCreds(): Boolean = user.isNotEmpty() && pass.isNotEmpty()

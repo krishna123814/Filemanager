@@ -2,6 +2,7 @@ package com.krishna.myfiles
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.TypedValue
@@ -33,6 +34,10 @@ class FileAdapter(
     var thumbPx: Int = 160
     var videoThumbs: Boolean = true
 
+    // Multi-select: selecting = mode ON; selected = chuni hui entries ke url (BrowserActivity ka live set)
+    var selecting: Boolean = false
+    var selected: Set<String> = emptySet()
+
     private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
@@ -41,7 +46,8 @@ class FileAdapter(
         val icon: TextView,
         val thumb: ImageView,
         val name: TextView,
-        val info: TextView
+        val info: TextView,
+        val check: TextView
     ) : RecyclerView.ViewHolder(root)
 
     inner class GridVH(
@@ -49,7 +55,8 @@ class FileAdapter(
         val icon: TextView,
         val thumb: ImageView,
         val name: TextView,
-        val badge: TextView
+        val badge: TextView,
+        val check: TextView
     ) : RecyclerView.ViewHolder(root)
 
     override fun getItemViewType(position: Int): Int = if (grid) 1 else 0
@@ -73,6 +80,12 @@ class FileAdapter(
             holder.badge.visibility = if (e.kind == Kind.VIDEO) View.VISIBLE else View.GONE
             bindThumb(holder.thumb, e)
         }
+        val sel = selecting && e.url in selected
+        val chk = if (holder is ListVH) holder.check else (holder as GridVH).check
+        chk.visibility = if (selecting) View.VISIBLE else View.GONE
+        chk.text = if (sel) "✓" else ""
+        chk.background = checkBg(sel)
+        holder.itemView.foreground = if (sel) ColorDrawable(0x55FFB300) else null
         holder.itemView.setOnClickListener { onClick(e) }
         holder.itemView.setOnLongClickListener {
             onLong(e)
@@ -87,6 +100,27 @@ class FileAdapter(
             iv.tag = null
             iv.setImageDrawable(null)
         }
+    }
+
+    private fun checkBg(on: Boolean): GradientDrawable {
+        val g = GradientDrawable()
+        g.shape = GradientDrawable.OVAL
+        if (on) {
+            g.setColor(0xFFFFB300.toInt())
+        } else {
+            g.setColor(0x66000000)
+            g.setStroke(ctx.dp(1), Color.WHITE)
+        }
+        return g
+    }
+
+    private fun checkView(): TextView {
+        val t = TextView(ctx)
+        t.textSize = 12f
+        t.setTextColor(Color.BLACK)
+        t.gravity = Gravity.CENTER
+        t.visibility = View.GONE
+        return t
     }
 
     private fun buildList(): ListVH {
@@ -134,11 +168,16 @@ class FileAdapter(
         info.textSize = 12f
         info.maxLines = 1
 
+        val check = checkView()
+        val clp = FrameLayout.LayoutParams(ctx.dp(20), ctx.dp(20), Gravity.TOP or Gravity.START)
+        clp.setMargins(ctx.dp(3), ctx.dp(3), 0, 0)
+        box.addView(check, clp)
+
         col.addView(name)
         col.addView(info)
         row.addView(box)
         row.addView(col)
-        return ListVH(row, icon, thumb, name, info)
+        return ListVH(row, icon, thumb, name, info, check)
     }
 
     private fun buildGrid(): GridVH {
@@ -179,6 +218,11 @@ class FileAdapter(
         badge.setPadding(ctx.dp(5), ctx.dp(1), ctx.dp(5), ctx.dp(1))
         cell.addView(badge, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END))
 
-        return GridVH(cell, icon, thumb, name, badge)
+        val check = checkView()
+        val clp = FrameLayout.LayoutParams(ctx.dp(22), ctx.dp(22), Gravity.TOP or Gravity.START)
+        clp.setMargins(ctx.dp(5), ctx.dp(5), 0, 0)
+        cell.addView(check, clp)
+
+        return GridVH(cell, icon, thumb, name, badge, check)
     }
 }

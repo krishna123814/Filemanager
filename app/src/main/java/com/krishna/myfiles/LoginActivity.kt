@@ -19,7 +19,7 @@ class LoginActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         if (Session.hasCreds()) {
-            startActivity(Intent(this, BrowserActivity::class.java))
+            startActivity(Intent(this, HomeActivity::class.java))
             finish()
             return
         }
@@ -100,7 +100,7 @@ class LoginActivity : AppCompatActivity() {
                     Dav.list(u)
                     runOnUiThread {
                         Session.persist(this)
-                        startActivity(Intent(this, BrowserActivity::class.java))
+                        startActivity(Intent(this, HomeActivity::class.java))
                         finish()
                     }
                 } catch (e: Exception) {
