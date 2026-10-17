@@ -24,6 +24,22 @@ Apne VPS ka file manager. Server par kuch naya install nahi karna: app seedha te
 - HF par abhi: folder ka rename nahi (folder ko Move se doosre folder me bhej sakte ho); video thumbnails band.
 - Server par `/hf/` aur `/xfer` chahiye (HF_FILEMANAGER_PLAN.md ke Step 1 + 2).
 
+## Phone Storage (naya)
+- Home par teesra card: 📱 **Phone Storage** (internal storage). Pehli baar permission maangta hai: Android 11+ par "All files access" (Settings me MyFiles ON karo).
+- Server jaisa hi browser: list/grid, sort, thumbnails (photo + video), image viewer, video/music player (background playback), rename, naya folder, delete (permanent, recycle bin nahi), info.
+- Dusre file types: tap karo to phone ke dusre app me khulti hain (PDF, APK, etc).
+- **Copy / Move / Paste** ab teeno storage ke beech kaam karta hai:
+  - Phone → AIC / HF = upload, AIC / HF → Phone = download, Phone → Phone = local copy/move (same storage me move instant hai).
+  - Phone wale transfers app khud chalata hai (notification ke saath foreground service), progress Transfers screen me server jobs ke saath dikhta hai. Server ↔ server transfers pehle jaise server par chalte hain.
+  - Naam pehle se ho to Skip / Rename / Overwrite wahi dialog.
+- Android 10 se neeche: normal storage permission. Android/data jaise protected folders Android ki wajah se nahi khulte.
+
+## Player / Viewer (naya)
+- 🎬 **Video:** swipe up/down (left = brightness, right = volume), left/right swipe = seek, double-tap = ±10s (beech me = play/pause), ⟳ rotate (Auto/Landscape/Portrait), 🔒 screen lock, ⋮ menu: speed, aspect (fit/zoom/stretch), audio track, subtitles (embedded + same-naam ki .srt/.vtt/.ass), PiP (home dabane par bhi), sleep timer, queue.
+- 🎵 **Music:** shuffle / repeat, album art (file ke andar ki), sleep timer, queue list, speed, background playback.
+- 🖼 **Image viewer:** rotate, slideshow, share, info, delete, dusre app me kholo (zoom pehle jaisa).
+- **Kholne ka tarika** (⋮ menu → "Kholne ka tarika"): App ka apna / Har baar puchho / Hamesha dusra app. Har file ke menu me "↗ Dusre app me kholo" bhi hai. Server ki video dusre player (BLC/VLC/MX) me stream hoti hai (login URL me jata hai); server ki photo/file pehle cache me utarti hai.
+
 ## Build (GitHub Actions)
 1. Naya repo banao. `unzip.yml` ko `.github/workflows/unzip.yml` me paste karo.
 2. Repo Secrets me 4 cheezein (Lion wali hi chalti hain): `LION_KEYSTORE_BASE64`, `LION_STORE_PASSWORD`, `LION_KEY_ALIAS`, `LION_KEY_PASSWORD`.

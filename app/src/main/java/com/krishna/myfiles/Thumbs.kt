@@ -94,11 +94,15 @@ object Thumbs {
         }
         fullPool.execute {
             val bmp = try {
-                val f = downloadTemp(url)
-                try {
-                    decode(f, target)
-                } finally {
-                    f.delete()
+                if (LocalFs.isLocal(url)) {
+                    decode(LocalFs.fileOf(url), target)
+                } else {
+                    val f = downloadTemp(url)
+                    try {
+                        decode(f, target)
+                    } finally {
+                        f.delete()
+                    }
                 }
             } catch (e: Throwable) {
                 null
@@ -132,11 +136,15 @@ object Thumbs {
         val bmp: Bitmap? = if (kind == Kind.VIDEO) {
             videoFrame(url, size)
         } else {
-            val f = downloadTemp(url)
-            try {
-                decode(f, size)
-            } finally {
-                f.delete()
+            if (LocalFs.isLocal(url)) {
+                decode(LocalFs.fileOf(url), size)
+            } else {
+                val f = downloadTemp(url)
+                try {
+                    decode(f, size)
+                } finally {
+                    f.delete()
+                }
             }
         }
         if (bmp != null) toDisk(url, size, bmp)
@@ -191,7 +199,11 @@ object Thumbs {
     private fun videoFrame(url: String, target: Int): Bitmap? {
         val mmr = MediaMetadataRetriever()
         try {
-            mmr.setDataSource(url, hashMapOf("Authorization" to Session.auth()))
+            if (LocalFs.isLocal(url)) {
+                mmr.setDataSource(LocalFs.fileOf(url).path)
+            } else {
+                mmr.setDataSource(url, hashMapOf("Authorization" to Session.auth()))
+            }
             val f = mmr.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: mmr.getFrameAtTime(0L)
                 ?: return null

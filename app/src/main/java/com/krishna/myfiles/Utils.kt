@@ -48,6 +48,12 @@ object Queue {
     @Volatile var media: List<Entry> = emptyList()
     @Volatile var mediaIndex: Int = 0
     @Volatile var pending: Boolean = false
+
+    /** video url -> subtitle (.srt/.vtt/.ass) url, jo usi folder me same naam se mili. */
+    @Volatile var subs: Map<String, String> = emptyMap()
+
+    /** Viewer se delete / badlav hua: browser wapas aakar listing refresh kare. */
+    @Volatile var dirty: Boolean = false
 }
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()

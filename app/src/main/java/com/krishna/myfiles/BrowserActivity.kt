@@ -14,6 +14,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -30,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -101,6 +103,11 @@ class BrowserActivity : AppCompatActivity() {
         }
 
         store = Store.from(intent.getStringExtra("store"))
+        if (store == Store.LOCAL && !LocalFs.hasAccess(this)) {
+            Toast.makeText(this, "Phone storage ki permission nahi hai — Home se Phone Storage kholo", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
         rootUrl = Dav.withSlash(Session.rootFor(store))
         gridMode = Session.bool(this, "grid", false)
         sortMode = Session.int(this, "sort", 0).coerceIn(0, sortNames.size - 1)
@@ -135,6 +142,10 @@ class BrowserActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::pasteBar.isInitialized) refreshPasteBar()
+        if (Queue.dirty && ::swipe.isInitialized) {
+            Queue.dirty = false
+            reload()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -163,7 +174,11 @@ class BrowserActivity : AppCompatActivity() {
         return b
     }
 
-    private fun storeColor(): Int = if (store == Store.HF) 0xFFEF6C00.toInt() else 0xFF1565C0.toInt()
+    private fun storeColor(): Int = when (store) {
+        Store.HF -> 0xFFEF6C00.toInt()
+        Store.LOCAL -> 0xFF2E7D32.toInt()
+        else -> 0xFF1565C0.toInt()
+    }
 
     private fun buildUi() {
         val root = LinearLayout(this)
@@ -308,7 +323,7 @@ class BrowserActivity : AppCompatActivity() {
 
     /** HF par video thumbnails band: MediaMetadataRetriever Authorization header redirect ke baad CDN par bhi bhej sakta hai. */
     private fun applyThumbFlag() {
-        adapter.videoThumbs = videoThumbs && store == Store.AIC
+        adapter.videoThumbs = videoThumbs && store != Store.HF
     }
 
     private fun spanCount(): Int =
@@ -359,7 +374,7 @@ class BrowserActivity : AppCompatActivity() {
         emptyTv.visibility = View.GONE
         io.execute {
             try {
-                val list = Dav.list(url)
+                val list = Fs.list(url)
                 runOnUiThread {
                     if (token != loadToken || isFinishing) return@runOnUiThread
                     val changed = url != currentUrl
@@ -419,6 +434,41 @@ class BrowserActivity : AppCompatActivity() {
         }
         when (e.kind) {
             Kind.DIR -> load(e.url, true)
+            Kind.IMAGE, Kind.VIDEO, Kind.AUDIO -> when (Opener.mode(this)) {
+                Opener.MODE_EXTERNAL -> Opener.external(this, e)
+                Opener.MODE_ASK -> {
+                    val what = when (e.kind) {
+                        Kind.IMAGE -> "viewer"
+                        else -> "player"
+                    }
+                    AlertDialog.Builder(this)
+                        .setTitle(e.name)
+                        .setItems(arrayOf("📱 MyFiles ka $what", "↗ Dusre app me kholo")) { _, i ->
+                            if (i == 0) openInApp(e) else Opener.external(this, e)
+                        }
+                        .show()
+                }
+                else -> openInApp(e)
+            }
+            Kind.OTHER -> {
+                if (store == Store.LOCAL) {
+                    Opener.external(this, e)
+                    return
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(e.name)
+                    .setItems(arrayOf("⬇ Download", "↗ Dusre app me kholo")) { _, i ->
+                        if (i == 0) download(e) else Opener.external(this, e)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+    }
+
+    /** MyFiles ka apna viewer / player. */
+    private fun openInApp(e: Entry) {
+        when (e.kind) {
             Kind.IMAGE -> {
                 val imgs = entries.filter { it.kind == Kind.IMAGE }
                 Queue.images = imgs
@@ -429,20 +479,33 @@ class BrowserActivity : AppCompatActivity() {
                 val same = entries.filter { it.kind == e.kind }
                 Queue.media = same
                 Queue.mediaIndex = same.indexOfFirst { it.url == e.url }.coerceAtLeast(0)
+                Queue.subs = if (e.kind == Kind.VIDEO) findSubtitles(same) else emptyMap()
                 Queue.pending = true
                 startActivity(
                     Intent(this, PlayerActivity::class.java).putExtra("video", e.kind == Kind.VIDEO)
                 )
             }
-            Kind.OTHER -> {
-                AlertDialog.Builder(this)
-                    .setTitle(e.name)
-                    .setMessage("Is file ka viewer nahi hai. Download karo?")
-                    .setPositiveButton("Download") { _, _ -> download(e) }
-                    .setNegativeButton("Cancel", null)
-                    .show()
+            else -> {}
+        }
+    }
+
+    /** Video ke naam wali .srt / .vtt / .ass usi folder me ho to jod do. */
+    private fun findSubtitles(videos: List<Entry>): Map<String, String> {
+        val exts = arrayOf("srt", "vtt", "ass", "ssa")
+        val byName = HashMap<String, Entry>()
+        for (x in entries) if (!x.isDir) byName[x.name.lowercase()] = x
+        val out = HashMap<String, String>()
+        for (v in videos) {
+            val base = v.name.substringBeforeLast('.').lowercase()
+            for (ext in exts) {
+                val sub = byName["$base.$ext"]
+                if (sub != null) {
+                    out[v.url] = sub.url
+                    break
+                }
             }
         }
+        return out
     }
 
     // ───────────────────────── multi-select ─────────────────────────
@@ -499,7 +562,8 @@ class BrowserActivity : AppCompatActivity() {
         }
         val e = selected.values.first()
         val opts = ArrayList<String>()
-        if (!e.isDir) opts.add(optDownload)
+        if (!e.isDir && store != Store.LOCAL) opts.add(optDownload)
+        if (!e.isDir) opts.add(optOpenWith)
         opts.add(optRename)
         opts.add(optInfo)
         AlertDialog.Builder(this)
@@ -507,6 +571,7 @@ class BrowserActivity : AppCompatActivity() {
             .setItems(opts.toTypedArray()) { _, i ->
                 when (opts[i]) {
                     optDownload -> download(e)
+                    optOpenWith -> Opener.external(this, e)
                     optRename -> rename(e)
                     optInfo -> info(e)
                 }
@@ -515,6 +580,7 @@ class BrowserActivity : AppCompatActivity() {
     }
 
     private val optDownload = "⬇ Download"
+    private val optOpenWith = "📂 Dusre app me kholo"
     private val optRename = "✏ Rename"
     private val optInfo = "ℹ Info"
 
@@ -559,7 +625,7 @@ class BrowserActivity : AppCompatActivity() {
 
     private fun doClip(move: Boolean) {
         if (selected.isEmpty()) return
-        val items = selected.values.map { ClipItem(store, Storages.pathOf(store, it.url), it.name, it.isDir) }
+        val items = selected.values.map { ClipItem(store, Storages.pathOf(store, it.url), it.name, it.isDir, it.size) }
         Session.setClip(items, move)
         val n = items.size
         exitSelect()
@@ -593,6 +659,16 @@ class BrowserActivity : AppCompatActivity() {
             Toast.makeText(this, "Ye items pehle se isi folder me hain", Toast.LENGTH_SHORT).show()
             return
         }
+        if (store == Store.LOCAL) {
+            val d = dest.trimEnd('/')
+            val inside = items.any {
+                it.store == Store.LOCAL && it.isDir && (d == it.path.trimEnd('/') || d.startsWith(it.path.trimEnd('/') + "/"))
+            }
+            if (inside) {
+                Toast.makeText(this, "Folder ko usi ke andar paste nahi kar sakte", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
         val names = entries.map { it.name }.toHashSet()
         if (items.any { it.name in names }) {
             askConflict { oc -> startXfer(items, move, oc, dest) }
@@ -620,7 +696,10 @@ class BrowserActivity : AppCompatActivity() {
         swipe.isRefreshing = true
         io.execute {
             try {
-                val id = Xfer.start(items, store, destPath, move, onConflict)
+                val id = if (LocalJobs.involvesLocal(items, store))
+                    LocalJobs.start(applicationContext, items, store, destPath, move, onConflict)
+                else
+                    Xfer.start(items, store, destPath, move, onConflict)
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     swipe.isRefreshing = false
@@ -691,7 +770,7 @@ class BrowserActivity : AppCompatActivity() {
             msg.text = "Cancel ho raha hai…"
             io.execute {
                 try {
-                    Xfer.cancel(id)
+                    Xfers.cancel(id)
                 } catch (e: Exception) {
                 }
             }
@@ -716,7 +795,7 @@ class BrowserActivity : AppCompatActivity() {
             var job: XferJob? = null
             var lost = false
             try {
-                job = Xfer.status(id)
+                job = Xfers.status(id)
             } catch (e: XferException) {
                 if (e.code == 404) lost = true
             } catch (e: Exception) {
@@ -830,7 +909,7 @@ class BrowserActivity : AppCompatActivity() {
     private fun newFolder() {
         val dir = currentUrl
         askText("Naya folder", "") { name ->
-            runOp("Folder ban gaya") { Dav.mkcol(dir + Uri.encode(name)) }
+            runOp("Folder ban gaya") { Fs.mkdir(dir, name) }
         }
     }
 
@@ -847,9 +926,7 @@ class BrowserActivity : AppCompatActivity() {
         val dir = currentUrl
         askText("Rename", e.name) { name ->
             if (name != e.name) {
-                runOp("Rename ho gaya") {
-                    Dav.move(e.url, dir + Uri.encode(name) + (if (e.isDir) "/" else ""))
-                }
+                runOp("Rename ho gaya") { Fs.rename(e, dir, name) }
             }
         }
     }
@@ -860,7 +937,11 @@ class BrowserActivity : AppCompatActivity() {
         val what = if (list.size == 1) list[0].name else "${list.size} items"
         val title: String
         val msg: String
-        if (store == Store.HF) {
+        if (store == Store.LOCAL) {
+            title = "Phone se delete?"
+            msg = what + "\n\n⚠ Phone se PERMANENTLY delete hoga (recycle bin nahi hai)." +
+                (if (hasDir) "\nFolder ho to uske andar ki saari files bhi jayengi." else "")
+        } else if (store == Store.HF) {
             title = "⚠ HF Bucket se delete?"
             msg = what + "\n\n⚠ HF Bucket se PERMANENTLY delete hoga. Trash nahi hai, wapas nahi aayega." +
                 (if (hasDir) "\nFolder ho to uske andar ki saari files bhi jayengi." else "") +
@@ -878,7 +959,7 @@ class BrowserActivity : AppCompatActivity() {
                     var last = ""
                     for (e in list) {
                         try {
-                            Dav.delete(e.url)
+                            Fs.delete(e.url)
                         } catch (ex: DavAuthException) {
                             throw ex
                         } catch (ex: Exception) {
@@ -941,7 +1022,9 @@ class BrowserActivity : AppCompatActivity() {
             .setTitle("Storage chuno")
             .setItems(labels) { _, i ->
                 val s = all[i]
-                if (s != store) {
+                if (s == Store.LOCAL && !LocalFs.hasAccess(this)) {
+                    Toast.makeText(this, "Pehle Home se Phone Storage kholo (permission ke liye)", Toast.LENGTH_LONG).show()
+                } else if (s != store) {
                     startActivity(Intent(this, BrowserActivity::class.java).putExtra("store", s.id))
                     finish()
                 }
@@ -952,8 +1035,9 @@ class BrowserActivity : AppCompatActivity() {
     private fun showMenu() {
         val acts = ArrayList<Pair<String, () -> Unit>>()
         acts.add("📁 Naya folder" to { newFolder() })
-        acts.add("⬆ Upload (files chuno)" to { pickFiles.launch(arrayOf("*/*")) })
+        if (store != Store.LOCAL) acts.add("⬆ Upload (files chuno)" to { pickFiles.launch(arrayOf("*/*")) })
         acts.add("🔁 Storage badlo" to { switchStorage() })
+        acts.add("🎬 Kholne ka tarika: ${Opener.labels[Opener.mode(this)]}" to { pickOpenMode() })
         acts.add("📊 Transfers" to { startActivity(Intent(this, TransfersActivity::class.java)) })
         acts.add("↕ Sort: ${sortNames[sortMode]}" to { showSort() })
         acts.add(
@@ -982,6 +1066,16 @@ class BrowserActivity : AppCompatActivity() {
         acts.add("🚪 Logout / server badlo" to { logout() })
         AlertDialog.Builder(this)
             .setItems(acts.map { it.first }.toTypedArray()) { _, which -> acts[which].second() }
+            .show()
+    }
+
+    private fun pickOpenMode() {
+        AlertDialog.Builder(this)
+            .setTitle("Photo / video / music kaise khole?")
+            .setSingleChoiceItems(Opener.labels, Opener.mode(this)) { d, which ->
+                Opener.setMode(this, which)
+                d.dismiss()
+            }
             .show()
     }
 

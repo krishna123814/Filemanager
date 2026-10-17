@@ -1,10 +1,15 @@
 package com.krishna.myfiles
 
+import android.Manifest
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.StatFs
+import android.provider.Settings
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -12,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -27,6 +33,13 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var hfSub: TextView
     private lateinit var hfCard: LinearLayout
     private lateinit var clipTv: TextView
+    private lateinit var localSub: TextView
+
+    private val storagePerm =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            refreshLocal()
+            if (ok) open(Store.LOCAL)
+        }
 
     /** null = HF theek (ya abhi pata nahi); String = HF band hai, ye sabab. */
     private var hfReason: String? = null
@@ -49,6 +62,7 @@ class HomeActivity : AppCompatActivity() {
         super.onResume()
         if (!::hfSub.isInitialized) return
         refreshClip()
+        refreshLocal()
         probeHf()
     }
 
@@ -99,8 +113,12 @@ class HomeActivity : AppCompatActivity() {
         }
         hfSub.text = "Check ho raha hai…"
 
+        localSub = TextView(this)
+        val localCard = card(Store.LOCAL, localSub) { openLocal() }
+
         col.addView(aicCard)
         col.addView(hfCard)
+        col.addView(localCard)
 
         clipTv = TextView(this)
         clipTv.setTextColor(0xFFFFB300.toInt())
@@ -157,6 +175,53 @@ class HomeActivity : AppCompatActivity() {
         return c
     }
 
+    private fun refreshLocal() {
+        if (!::localSub.isInitialized) return
+        localSub.text = if (LocalFs.hasAccess(this)) {
+            try {
+                val sf = StatFs(LocalFs.rootDir().path)
+                "Phone ki files · " + fmtSize(sf.availableBytes) + " khaali"
+            } catch (e: Exception) {
+                "Phone ki files"
+            }
+        } else {
+            "Phone ki files · permission chahiye (dabao)"
+        }
+    }
+
+    private fun openLocal() {
+        if (LocalFs.hasAccess(this)) {
+            open(Store.LOCAL)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Phone storage ki permission")
+            .setMessage(
+                if (Build.VERSION.SDK_INT >= 30)
+                    "Phone ki saari files dikhane ke liye 'All files access' chahiye.\n\nSettings khulegi: MyFiles ke aage switch ON karo, phir wapas aao."
+                else
+                    "Phone ki files dikhane ke liye storage permission chahiye."
+            )
+            .setPositiveButton("Allow") { _, _ ->
+                if (Build.VERSION.SDK_INT >= 30) {
+                    try {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                    }
+                } else {
+                    storagePerm.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun open(store: Store) {
         startActivity(Intent(this, BrowserActivity::class.java).putExtra("store", store.id))
     }
@@ -186,7 +251,19 @@ class HomeActivity : AppCompatActivity() {
 
     private fun showMenu() {
         AlertDialog.Builder(this)
-            .setItems(arrayOf("🚪 Logout / server badlo")) { _, _ -> logout() }
+            .setItems(
+                arrayOf("🎬 Kholne ka tarika: " + Opener.labels[Opener.mode(this)], "🚪 Logout / server badlo")
+            ) { _, i -> if (i == 0) pickOpenMode() else logout() }
+            .show()
+    }
+
+    private fun pickOpenMode() {
+        AlertDialog.Builder(this)
+            .setTitle("Photo / video / music kaise khole?")
+            .setSingleChoiceItems(Opener.labels, Opener.mode(this)) { d, which ->
+                Opener.setMode(this, which)
+                d.dismiss()
+            }
             .show()
     }
 

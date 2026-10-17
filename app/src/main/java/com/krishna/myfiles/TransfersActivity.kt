@@ -104,7 +104,7 @@ class TransfersActivity : AppCompatActivity() {
         subTv = TextView(this)
         subTv.setTextColor(0xFF9E9E9E.toInt())
         subTv.textSize = 12f
-        subTv.text = "Copy / Move server par chalte hain, app band ho to bhi"
+        subTv.text = "Server wale transfer server par chalte hain, phone wale app me"
         col.addView(title)
         col.addView(subTv)
 
@@ -147,7 +147,13 @@ class TransfersActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 err = e.message ?: "error"
             }
-            val got: List<XferJob>? = list
+            // phone wali jobs (app ke andar) server list ke saath mila do
+            val mine = LocalJobs.list()
+            val merged: List<XferJob>? =
+                if (list != null) (list + mine).sortedByDescending { it.created }
+                else if (mine.isNotEmpty()) mine
+                else null
+            val got: List<XferJob>? = merged
             val bad: String? = err
             val authFail: Boolean = auth
             runOnUiThread {
@@ -166,7 +172,7 @@ class TransfersActivity : AppCompatActivity() {
                     jobs = got
                     adapter.notifyDataSetChanged()
                     val run = got.count { it.active }
-                    subTv.text = if (run > 0) "$run chal rahi / queue me" else "Copy / Move server par chalte hain, app band ho to bhi"
+                    subTv.text = if (run > 0) "$run chal rahi / queue me" else "Server wale transfer server par chalte hain, phone wale app me"
                     emptyTv.visibility = if (got.isEmpty()) View.VISIBLE else View.GONE
                     if (got.isEmpty()) emptyTv.text = "Koi transfer nahi.\n(Server restart par history chali jaati hai)"
                     ui.postDelayed({ poll(gen) }, 2000)
@@ -184,7 +190,7 @@ class TransfersActivity : AppCompatActivity() {
     private fun cancelJob(j: XferJob) {
         io.execute {
             try {
-                Xfer.cancel(j.id)
+                Xfers.cancel(j.id)
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, "❌ ${e.message}", Toast.LENGTH_LONG).show() }
             }

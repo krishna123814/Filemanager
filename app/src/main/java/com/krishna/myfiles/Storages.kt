@@ -9,7 +9,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /** Do storage: VPS ki disk (WebDAV /dav/) aur HF Bucket (WebDAV /hf/). Dono ek hi login se. */
 enum class Store(val id: String, val label: String, val short: String, val icon: String) {
     AIC("aic", "AIC Disk", "AIC", "💽"),
-    HF("hf", "HF Bucket", "HF", "☁️");
+    HF("hf", "HF Bucket", "HF", "☁️"),
+    LOCAL("local", "Phone Storage", "PHONE", "📱");
 
     companion object {
         fun from(id: String?): Store = values().firstOrNull { it.id == id } ?: AIC
@@ -17,7 +18,7 @@ enum class Store(val id: String, val label: String, val short: String, val icon:
 }
 
 /** Copy / Move clipboard ka ek item. `path` = storage ke root se, jaise "/music/a.mp3" (server /xfer yahi leta hai). */
-data class ClipItem(val store: Store, val path: String, val name: String, val isDir: Boolean)
+data class ClipItem(val store: Store, val path: String, val name: String, val isDir: Boolean, val size: Long = 0L)
 
 object Storages {
 
@@ -40,9 +41,20 @@ object Storages {
     fun root(store: Store): String {
         val b = base()
         return when (store) {
+            Store.LOCAL -> LocalFs.rootUrl()
             Store.AIC -> if (b.endsWith("/hf/")) parent() + "dav/" else b
             Store.HF -> if (b.endsWith("/hf/")) b else parent() + "hf/"
         }
+    }
+
+    /** Storage path -> URL. Phone ke liye path absolute hota hai (\"/storage/emulated/0/DCIM\"). */
+    fun urlOf(store: Store, path: String, isDir: Boolean): String {
+        if (store == Store.LOCAL) return LocalFs.urlOf(java.io.File(path), isDir)
+        val segs = path.trim('/').split('/').filter { it.isNotEmpty() }
+        val sb = StringBuilder(Dav.withSlash(root(store)))
+        for (s in segs) sb.append(Uri.encode(s)).append('/')
+        if (!isDir && segs.isNotEmpty()) sb.setLength(sb.length - 1)
+        return sb.toString()
     }
 
     /** `/xfer` API ka base (bina trailing slash). */
@@ -50,6 +62,7 @@ object Storages {
 
     /** Entry URL -> storage ke andar ka path ("/music/a b.mp3"; folder ho to trailing "/" rehta hai). */
     fun pathOf(store: Store, url: String): String {
+        if (store == Store.LOCAL) return LocalFs.fileOf(url).absolutePath
         val rootPath = root(store).toHttpUrl().encodedPath
         val p = url.toHttpUrl().encodedPath
         val rel = if (p.startsWith(rootPath)) p.substring(rootPath.length) else p.trimStart('/')
